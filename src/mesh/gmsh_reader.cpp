@@ -58,6 +58,11 @@ template <int dim>
 void rotate_indices(std::vector<unsigned int> &numbers, const unsigned int n_indices_per_direction, const char direction)
 {
   const unsigned int n = n_indices_per_direction;
+
+  const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+  dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+  pcout  << "Total Order = " << n << std::endl;
+
   unsigned int       s = n;
   for (unsigned int i = 1; i < dim; ++i)
     s *= n;
@@ -73,7 +78,7 @@ void rotate_indices(std::vector<unsigned int> &numbers, const unsigned int n_ind
     }
   else
     {
-      switch (direction)
+      switch (direction)                                                      //DIRECTION IS THE LETTER PICKED
         {
           // Rotate xy-plane
           // counter-clockwise
@@ -247,13 +252,17 @@ void read_gmsh_entities(std::ifstream &infile, std::array<std::map<int, int>, 4>
 template<int spacedim>
 void read_gmsh_nodes( std::ifstream &infile, std::vector<dealii::Point<spacedim>> &vertices, std::map<int, int> &vertex_indices )
 {
+
+    const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+
     std::string  line;
     // now read the nodes list
     unsigned int n_entity_blocks, n_vertices;
     int min_node_tag;
     int max_node_tag;
     infile >> n_entity_blocks >> n_vertices >> min_node_tag >> max_node_tag;
-    std::cout << "Reading nodes..." << std::endl;
+    pcout << "Reading nodes..." << std::endl;
     //std::cout << "Number of entity blocks: " << n_entity_blocks << " with a total of " << n_vertices << " vertices." << std::endl;
 
     vertices.resize(n_vertices);
@@ -270,15 +279,20 @@ void read_gmsh_nodes( std::ifstream &infile, std::vector<dealii::Point<spacedim>
 
         //std::cout << "Entity block: " << entity_block << " with tag " << tagEntity << " in " << dimEntity << " dimension with " << numNodes << " nodes. Parametric: " << parametric << std::endl;
 
+        //Vertex Number gives you the unique id to that node
         std::vector<int> vertex_numbers;
 
+        //GET ALL THE VERTEX ID FOR THAT ENTITY
         for (unsigned long vertex_per_entity = 0; vertex_per_entity < numNodes; ++vertex_per_entity) {
             int vertex_number;
             infile >> vertex_number;
             //std::cout << vertex_number << std::endl;
-            vertex_numbers.push_back(vertex_number);
+            vertex_numbers.push_back(vertex_number);                //Vertex number starts with 1
         }
 
+        //Parsed all the nodes in this entity with their vertex number stored in vertex_numbers
+
+        //READ THE COORDINATES OF THE POINTS
         for (unsigned long vertex_per_entity = 0; vertex_per_entity < numNodes; ++vertex_per_entity, ++global_vertex) {
             // read vertex
             double x[3];
@@ -286,15 +300,15 @@ void read_gmsh_nodes( std::ifstream &infile, std::vector<dealii::Point<spacedim>
             //std::cout << x[0] << " " << x[1] << " " << x[2] << " ";
             //if (parametric == 0) std::cout << std::endl;
 
-
+            //Enters the coordinates for the points INSIDE THE VERTICES VECTOR OF POINTS
             for (unsigned int d = 0; d < spacedim; ++d) {
                 vertices[global_vertex](d) = x[d];
             }
 
             int vertex_number;
-            vertex_number = vertex_numbers[vertex_per_entity];
+            vertex_number = vertex_numbers[vertex_per_entity];                  //Which node index are we at now
             // store mapping
-            vertex_indices[vertex_number] = global_vertex;
+            vertex_indices[vertex_number] = global_vertex;                      //Insert the vertex for tracking
 
 
             // ignore parametric coordinates
@@ -313,7 +327,7 @@ void read_gmsh_nodes( std::ifstream &infile, std::vector<dealii::Point<spacedim>
         }
     }
     AssertDimension(global_vertex, n_vertices);
-    std::cout << "Finished reading nodes." << std::endl;
+    pcout << "Finished reading nodes." << std::endl;
 }
 
 unsigned int gmsh_cell_type_to_order(unsigned int cell_type)
@@ -347,6 +361,11 @@ unsigned int gmsh_cell_type_to_order(unsigned int cell_type)
 template<int dim>
 unsigned int find_grid_order(std::ifstream &infile)
 {
+
+    //Added for pcout
+    const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+
     auto entity_file_position = infile.tellg();
 
     unsigned int grid_order = 0;
@@ -355,8 +374,8 @@ unsigned int find_grid_order(std::ifstream &infile)
     int min_ele_tag, max_ele_tag;
     infile >> n_entity_blocks >> n_cells >> min_ele_tag >> max_ele_tag;
 
-    std::cout << "Finding grid order..." << std::endl;
-    std::cout << n_entity_blocks << " entity blocks with a total of " << n_cells << " cells. " << std::endl;
+    pcout << "Finding grid order..." << std::endl;
+    pcout << n_entity_blocks << " entity blocks with a total of " << n_cells << " cells. " << std::endl;
 
     std::vector<unsigned int> vertices_id;
 
@@ -393,7 +412,7 @@ unsigned int find_grid_order(std::ifstream &infile)
     infile.seekg(entity_file_position);
 
     AssertDimension(global_cell, n_cells);
-    std::cout << "Found grid order = " << grid_order << std::endl;
+    pcout << "Found grid order = " << grid_order << std::endl;
     return grid_order;
 }
 
@@ -411,10 +430,114 @@ unsigned int ij_to_num(const unsigned int i,
     return i + j*n_per_line;
 }
 
+
+std::vector<unsigned int>
+face_node_finder(const unsigned int degree)
+{
+
+    /**
+ * For Debug output
+ */
+    const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+
+    // number of support points in each direction
+    const unsigned int n = degree + 1;
+
+    const unsigned int dofs_per_cell = dealii::Utilities::fixed_power<2>(n);
+
+    std::vector<unsigned int> h2l_2D(dofs_per_cell);
+    if (degree == 0) {
+        h2l_2D[0] = 0;
+        return h2l_2D;
+    }
+
+    // polynomial degree
+    const unsigned int dofs_per_line = degree - 1;
+
+    pcout << "DOF_PER_CELL = " << dofs_per_cell << std::endl;
+    pcout << "DOF_PER_LINE = " << dofs_per_line << std::endl;
+
+    unsigned int next_index = 0;
+    int subdegree = degree;
+    int square_reduction = 0;
+    while (subdegree > 0) {
+
+        unsigned int start = 0 + square_reduction;
+        unsigned int end = n - square_reduction;
+
+        // First the four vertices
+        {
+            unsigned int i, j;
+            // Bottom left
+            i = start; j = start;
+            h2l_2D[next_index++] = ij_to_num(i,j,n);
+            // Bottom right
+            i = end-1; j = start;
+            h2l_2D[next_index++] = ij_to_num(i,j,n);
+            // Top right
+            i = end-1; j = end-1;
+            h2l_2D[next_index++] = ij_to_num(i,j,n);
+            // Top left
+            i = start; j = end-1;
+            h2l_2D[next_index++] = ij_to_num(i,j,n);
+        }
+
+        // Bottom line
+        {
+            unsigned int j = start;
+            for (unsigned int i = start+1; i < end-1; ++i)
+                h2l_2D[next_index++] = ij_to_num(i,j,n);
+        }
+        // Right line
+        {
+            unsigned int i = end-1;
+            for (unsigned int j = start+1; j < end-1; ++j)
+                h2l_2D[next_index++] = ij_to_num(i,j,n);
+        }
+        // Top line (right to left)
+        {
+            unsigned int j = end-1;
+            //for (unsigned int i = start+1; i < end-1; ++i)
+            // Need signed int otherwise, j=0 followed by --j results in j=UINT_MAX
+            for (int i = end-2; i > (int)start; --i)
+                h2l_2D[next_index++] = ij_to_num(i,j,n);
+        }
+        // Left line (top to bottom order)
+        {
+            unsigned int i = start;
+            //for (unsigned int j = start+1; j < end-1; ++j)
+            // Need signed int otherwise, j=0 followed by --j results in j=UINT_MAX
+            for (int j = end-2; j > (int)start; --j)
+                h2l_2D[next_index++] = ij_to_num(i,j,n);
+        }
+
+        subdegree -= 2;
+        square_reduction += 1;
+
+    }
+    if (subdegree == 0) {
+        const unsigned int middle = (n-1)/2;
+        h2l_2D[next_index++] = ij_to_num(middle, middle, n);
+    }
+
+    Assert(next_index == dofs_per_cell, dealii::ExcInternalError());
+
+    return h2l_2D;
+}
+
+
 template <int dim>
 std::vector<unsigned int>
 gmsh_hierarchic_to_lexicographic(const unsigned int degree)
 {
+
+    /**
+     * For Debug output
+     */
+    const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+
     // number of support points in each direction
     const unsigned int n = degree + 1;
 
@@ -428,6 +551,9 @@ gmsh_hierarchic_to_lexicographic(const unsigned int degree)
 
     // polynomial degree
     const unsigned int dofs_per_line = degree - 1;
+
+    pcout << "DOF_PER_CELL = " << dofs_per_cell << std::endl;
+    pcout << "DOF_PER_LINE = " << dofs_per_line << std::endl;
 
     // the following lines of code are somewhat odd, due to the way the
     // hierarchic numbering is organized. if someone would really want to
@@ -514,96 +640,246 @@ gmsh_hierarchic_to_lexicographic(const unsigned int degree)
         Assert(next_index == dofs_per_cell, dealii::ExcInternalError());
 
           break;
+
     } case 3: {
 
-        Assert(false, dealii::ExcNotImplemented());
-
+        //INDEX START AT 0
         unsigned int next_index = 0;
+        std::vector<unsigned int> face_position;
+        std::vector<unsigned int> recursive_3D_position;
+        std::vector<unsigned int> recursive_3D_nodes;
+        std::vector<unsigned int> face_nodes;
+
         // first the eight vertices
-        h2l[next_index++] = 0;                        // 0
-        h2l[next_index++] = (1) * degree;             // 1
-        h2l[next_index++] = (n)*degree;               // 2
-        h2l[next_index++] = (n + 1) * degree;         // 3
-        h2l[next_index++] = (n * n) * degree;         // 4
-        h2l[next_index++] = (n * n + 1) * degree;     // 5
-        h2l[next_index++] = (n * n + n) * degree;     // 6
-        h2l[next_index++] = (n * n + n + 1) * degree; // 7
+        h2l[next_index++] = 0;                          // 0
+        h2l[next_index++] = (1) * degree;               // 1
+        h2l[next_index++] = (n + 1)*degree;             // 2
+        h2l[next_index++] = (n) * degree;               // 3
+        h2l[next_index++] = (n * n) * degree;           // 4
+        h2l[next_index++] = (n * n + 1) * degree;       // 5
+        h2l[next_index++] = (n * n + n + 1) * degree;   // 6
+        h2l[next_index++] = (n * n + n) * degree;       // 7
 
-        // line 0
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = (i + 1) * n;
-        // line 1
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = n - 1 + (i + 1) * n;
-        // line 2
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = 1 + i;
-        // line 3
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = 1 + i + n * (n - 1);
+        if (degree > 1) {
 
-        // line 4
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = (n - 1) * n * n + (i + 1) * n;
-        // line 5
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = (n - 1) * (n * n + 1) + (i + 1) * n;
-        // line 6
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = n * n * (n - 1) + i + 1;
-        // line 7
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = n * n * (n - 1) + i + 1 + n * (n - 1);
+            face_nodes = face_node_finder(degree-2);                     //PHYSICAL INTERPRETATION OF THE NODES
 
-        // line 8
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = (i + 1) * n * n;
-        // line 9
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = n - 1 + (i + 1) * n * n;
-        // line 10
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = (i + 1) * n * n + n * (n - 1);
-        // line 11
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          h2l[next_index++] = n - 1 + (i + 1) * n * n + n * (n - 1);
+            pcout << "DEGREE " << degree << std::endl;
+            {
+                unsigned int n = degree - 1;
+                pcout << "GMSH H2L " << std::endl;
+                for (int j = n - 1; j >= 0; --j) {
+                    for (unsigned int i = 0; i < n; ++i) {
+                        const unsigned int ij = ij_to_num(i, j, n);
+                        pcout << face_nodes[ij] << " ";
+                    }
+                    pcout << std::endl;
+                }
+            }
+
+            pcout << "" << std::endl;
 
 
-        // inside quads
-        // face 0
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          for (unsigned int j = 0; j < dofs_per_line; ++j)
-            h2l[next_index++] = (i + 1) * n * n + n * (j + 1);
-        // face 1
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          for (unsigned int j = 0; j < dofs_per_line; ++j)
-            h2l[next_index++] = (i + 1) * n * n + n - 1 + n * (j + 1);
-        // face 2, note the orientation!
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          for (unsigned int j = 0; j < dofs_per_line; ++j)
-            h2l[next_index++] = (j + 1) * n * n + i + 1;
-        // face 3, note the orientation!
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          for (unsigned int j = 0; j < dofs_per_line; ++j)
-            h2l[next_index++] = (j + 1) * n * n + n * (n - 1) + i + 1;
-        // face 4
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          for (unsigned int j = 0; j < dofs_per_line; ++j)
-            h2l[next_index++] = n * (i + 1) + j + 1;
-        // face 5
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          for (unsigned int j = 0; j < dofs_per_line; ++j)
-            h2l[next_index++] = (n - 1) * n * n + n * (i + 1) + j + 1;
+            // line 0
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = i + 1;
+                pcout << "line 0 - " << i + 1 << std::endl;
+            }
 
-        // inside hex
-        for (unsigned int i = 0; i < dofs_per_line; ++i)
-          for (unsigned int j = 0; j < dofs_per_line; ++j)
-            for (unsigned int k = 0; k < dofs_per_line; ++k)
-              h2l[next_index++] = n * n * (i + 1) + n * (j + 1) + k + 1;
+            // line 1
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (i + 1) * n;
+                pcout << "line 1 - " << (i + 1) * n << std::endl;
+            }
 
+            // line 2
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (i + 1) * n * n;
+                pcout << "line 2 - " << (i + 1) * n * n << std::endl;
+            }
+
+            // line 3
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (2 + i) * n - 1;
+                pcout << "line 3 - " << (2 + i) * n - 1 << std::endl;
+            }
+
+            // line 4
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (n * n * (i + 1)) + degree;
+                pcout << "line 4 - " << (n * n * (i + 1)) + degree << std::endl;
+            }
+
+            // line 5
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (i + 1) + n * degree;
+                pcout << "line 5 - " << (i + 1) + n * degree << std::endl;
+            }
+
+            // line 6
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (degree * n + (n * n * i)) + degree;
+                pcout << "line 6 - " << (degree * n + (n * n * (i + 1))) + degree << std::endl;
+            }
+
+            // line 7
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = degree * n + (n * n * i);
+                pcout << "line 7 - " << degree * n + (n * n * (i + 1)) << std::endl;
+            }
+            // line 8
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (n * n) * degree + (i + 1);
+                pcout << "line 8 - " << (n * n) * degree + (i + 1) << std::endl;
+            }
+
+            // line 9
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (i + 1) * n + (n * n) * degree;
+                pcout << "line 9 - " << (i + 1) * n + (n * n) * degree << std::endl;
+            }
+            // line 10
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (2 + i) * n - 1 + (n * n) * degree;
+                pcout << "line 10 - " << (2 + i) * n - 1 + (n * n) * degree << std::endl;
+            }
+            // line 11
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                h2l[next_index++] = (i + 1) + n * degree + (n * n) * degree;
+                pcout << "line 11 - " << (i + 1) + n * degree + (n * n) * degree << std::endl;
+            }
+
+            // inside quads
+            // face 0
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                for (unsigned int j = 0; j < dofs_per_line; ++j) {
+                    face_position.push_back((n * (i + 1)) + (j + 1));
+                }
+            }
+
+            for (unsigned int i = 0; i < (degree - 1) * (degree - 1); ++i) {
+                h2l[next_index++] = face_position.at(face_nodes[i]);
+            }
+
+            face_position.clear();
+
+            // face 1
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                for (unsigned int j = 0; j < dofs_per_line; ++j) {
+                    face_position.push_back((n * n * (i + 1)) + (j + 1));
+                }
+            }
+
+            for (unsigned int i = 0; i < (degree - 1) * (degree - 1); ++i) {
+                h2l[next_index++] = face_position.at(face_nodes[i]);
+            }
+
+            face_position.clear();
+
+            // face 2 -> Orientation is changed
+
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                for (unsigned int j = 0; j < dofs_per_line; ++j) {
+//                face_position.push_back((n * n * (i + 1)) + n + n * j);
+                    face_position.push_back((n * n * (j + 1)) + n + i * n);
+                }
+            }
+
+            for (unsigned int i = 0; i < (degree - 1) * (degree - 1); ++i) {
+                h2l[next_index++] = face_position.at(face_nodes[i]);
+            }
+
+            face_position.clear();
+
+            // face 3
+
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                for (unsigned int j = 0; j < dofs_per_line; ++j) {
+                    face_position.push_back(n * (j + 2) - 1 + i * (n * n));
+                }
+            }
+
+            for (unsigned int i = 0; i < (degree - 1) * (degree - 1); ++i) {
+                h2l[next_index++] = face_position.at(face_nodes[i]);
+            }
+
+            face_position.clear();
+
+            // face 4
+
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                for (unsigned int j = 0; j < dofs_per_line; ++j) {
+                    face_position.push_back((n * n * i) + (n * n * 2) - (j + 1) - 1);
+                }
+            }
+
+            for (unsigned int i = 0; i < (degree - 1) * (degree - 1); ++i) {
+                h2l[next_index++] = face_position.at(face_nodes[i]);
+            }
+
+            face_position.clear();
+
+            // face 5
+
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                for (unsigned int j = 0; j < dofs_per_line; ++j) {
+                    face_position.push_back((n * n * degree + n + (j + 1)) + i * n);
+                }
+            }
+
+            for (unsigned int i = 0; i < (degree - 1) * (degree - 1); ++i) {
+                h2l[next_index++] = face_position.at(face_nodes[i]);
+            }
+
+            //Build the inner 3D structure with global index position
+            for (unsigned int i = 0; i < dofs_per_line; ++i) {
+                for (unsigned int j = 0; j < dofs_per_line; ++j) {
+                    for (unsigned int k = 0; k < dofs_per_line; ++k) {
+                        recursive_3D_position.push_back(n * n * (degree - i) - n - 2 - (n * k) - j);
+                    }
+                }
+            }
+
+            pcout << "3D Inner Cube" << std::endl;
+            for (unsigned int aInt: recursive_3D_position) {
+                pcout << aInt << std::endl;
+            }
+
+            /**
+             * Now, we have an inside hex for hex of order 3 and more (2 has a single point)
+             * Idea now is to use recursion and apply the same logic to the inner block
+             */
+            if (degree == 2) {
+                h2l[next_index++] = n * n * n - 1;
+            } else {
+
+                /**
+                 * Once this is out, we need to do some node processing, since the nodes are not at the correct spots
+                 * Use the global index information to track it, i.e., get the transformed indices, and allocate them
+                 * to the global index. This would make sense since the global index are always true.
+                 */
+                recursive_3D_nodes = gmsh_hierarchic_to_lexicographic<dim>(degree - 2);
+
+                pcout << "Printing recursive_3D_nodes" << std::endl;
+                for (unsigned int aInt : recursive_3D_nodes) {
+                    pcout << aInt << std::endl;
+                }
+
+                pcout << "Degree = " << degree << std::endl;
+                pcout << "Dim = " << dim << std::endl;
+
+                //Apply the recursive_3D_nodes on the recursive_3D_position vector
+                for (unsigned int i = 0; i < pow((degree - 1),3); ++i) {
+                    h2l[next_index++] = recursive_3D_position.at(recursive_3D_nodes[i]);
+                }
+            }
+        }
+
+        pcout << "Next_index = " << next_index << std::endl;
         Assert(next_index == dofs_per_cell, dealii::ExcInternalError());
 
         break;
+
     } default: {
         Assert(false, dealii::ExcNotImplemented());
     }
@@ -612,6 +888,8 @@ gmsh_hierarchic_to_lexicographic(const unsigned int degree)
 
     return h2l;
 }
+
+
 
 unsigned int dealii_node_number(const unsigned int i,
                                 const unsigned int j,
@@ -635,24 +913,10 @@ std::shared_ptr< HighOrderGrid<dim, double> >
 read_gmsh(std::string filename, int requested_grid_order)
 {
 
-    //for (unsigned int deg = 1; deg < 7; ++deg) {
-    //    std::cout << "DEGREE " << deg << std::endl;
-    //    std::vector<unsigned int> h2l = gmsh_hierarchic_to_lexicographic<dim>(deg);
-    //    std::vector<unsigned int> l2h = dealii::Utilities::invert_permutation(h2l);
-
-    //    unsigned int n = deg+1;
-    //    std::cout << "L2H "  << std::endl;
-    //    for (int j=n-1; j>=0; --j) {
-    //        for (unsigned int i=0; i<n; ++i) {
-    //            const unsigned int ij = ij_to_num(i,j,n);
-    //            std::cout << l2h[ij] << " ";
-    //        }
-    //        std::cout << std::endl;
-    //    }
-
-    //    std::cout << std::endl << std::endl;
-    //}
-    //std::abort();
+    const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+    dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+    pcout << "dim = " << dim << std::endl;
+    pcout << "spacedim = " << dim << std::endl;
 
     Assert(dim==2, dealii::ExcInternalError());
     std::ifstream infile;
@@ -663,8 +927,7 @@ read_gmsh(std::string filename, int requested_grid_order)
     // This array stores maps from the 'entities' to the 'physical tags' for
     // points, curves, surfaces and volumes. We use this information later to
     // assign boundary ids.
-    std::array<std::map<int, int>, 4> tag_maps;
-  
+    std::array<std::map<int, int>, 4> tag_maps;                                 //ONLY 4 BECAUSE -> POINTS, LINE, FACE, VOLUME
   
     infile >> line;
   
@@ -677,7 +940,6 @@ read_gmsh(std::string filename, int requested_grid_order)
     } else {
       //AssertThrow(false, dealii::ExcInvalidGMSHInput(line));
     }
-  
   
     // if file format is 2.0 or greater then we also have to read the rest of the
     // header
@@ -693,7 +955,6 @@ read_gmsh(std::string filename, int requested_grid_order)
   
         Assert(file_type == 0, dealii::ExcNotImplemented());
         Assert(data_size == sizeof(double), dealii::ExcNotImplemented());
-  
   
         // read the end of the header and the first line of the nodes description
         // to synch ourselves with the format 1 handling above
@@ -735,7 +996,13 @@ read_gmsh(std::string filename, int requested_grid_order)
     // vertices vector
     std::map<int, int> vertex_indices;
     read_gmsh_nodes( infile, vertices, vertex_indices );
-  
+
+//    for (long unsigned int k = 0; k < vertices.size(); k++) {
+//        pcout << "Vertex ID = " << vertex_indices[k+1] << " | Point Coord = " << vertices[k] << std::endl;
+//    }
+
+//    pcout << "Total size of mapping " << vertex_indices.size() << std::endl;
+
     // Assert we reached the end of the block
     infile >> line;
     static const std::string end_nodes_marker = "$EndNodes";
@@ -746,17 +1013,28 @@ read_gmsh(std::string filename, int requested_grid_order)
     static const std::string begin_elements_marker = "$Elements";
     //AssertThrow(line == begin_elements_marker, PHiLiP::ExcInvalidGMSHInput(line));
 
+    //Find Order goes into the element then check for the msh type (the codes are shown in the gmsh_reader.hpp)             -> SWEEP THROUGH THE WHOLE ELEMENTS, THEN FIRST HIGHEST ORDER (LAST MESH TYPE)
     const unsigned int grid_order = find_grid_order<dim>(infile);
-  
+
+    //From this point and on, we are starting to use Dealii Triangulation to capture the mesh
     using Triangulation = dealii::parallel::distributed::Triangulation<dim>;
-    std::shared_ptr<Triangulation> triangulation = std::make_shared<Triangulation>(
+
+    std::shared_ptr<Triangulation> triangulation = std::make_shared<Triangulation>(                 //CREATE A TRIANGULATION
         MPI_COMM_WORLD,
         typename dealii::Triangulation<dim>::MeshSmoothing(
             dealii::Triangulation<dim>::smoothing_on_refinement |
-            dealii::Triangulation<dim>::smoothing_on_coarsening));
+            dealii::Triangulation<dim>::smoothing_on_coarsening));                                  //THIS HERE UNLOCKS THE SMOOTHING CAPABILITIES UPON REFINE AND COARSEN OF THE MESH
 
+    pcout << "What is the grid_order passed to high_order_grid > " << grid_order << std::endl;
+
+    /**
+     * CONSTRUCT A HIGHER ORDER GRID INSTANCE
+     */
     auto high_order_grid = std::make_shared<HighOrderGrid<dim, double>>(grid_order, triangulation);
-  
+
+    /**
+     * THIS IS WHERE WE START TO READ FROM ELEMENTS
+     */
     unsigned int n_entity_blocks, n_cells;
     int min_ele_tag, max_ele_tag;
     infile >> n_entity_blocks >> n_cells >> min_ele_tag >> max_ele_tag;
@@ -764,14 +1042,13 @@ read_gmsh(std::string filename, int requested_grid_order)
     // standard way infile deal.II to pass boundary indicators attached to individual
     // vertices, so do this by hand via the boundary_ids_1d array
 
-    std::vector<dealii::CellData<dim>> p1_cells;
-    std::vector<dealii::CellData<dim>> high_order_cells;
-    dealii::CellData<dim> temp_high_order_cells;
+    std::vector<dealii::CellData<dim>> p1_cells;                                //VERTICES OF THE CELLS THAT ARE OF INTEREST (STRUCTDIM == DIM)
+    std::vector<dealii::CellData<dim>> high_order_cells;                        //THIS IS FOR INNER NODES
+    dealii::CellData<dim> temp_high_order_cells;                                //THIS IS FOR POINTS ETC
 
-    dealii::SubCellData                                subcelldata;
-    std::map<unsigned int, dealii::types::boundary_id> boundary_ids_1d;
-
-  
+    dealii::SubCellData                                subcelldata;             //THIS HERE ONLY STORES THE VERTEX POINTS OF THE CELL BOUNDARIES (I.E. 2 VERTEX FOR LINE, 4 VERTEX FOR FACES)
+                                                                                //  NOTE-> SUBCELLDATA ONLY HAS BOUNDARY_LINES (LINES -> CELLDATA<1>) AND BOUNDARY_QUADS (FACES -> CELLDATA<2>)
+    std::map<unsigned int, dealii::types::boundary_id> boundary_ids_1d;         //
   
     unsigned int global_cell = 0;
     for (unsigned int entity_block = 0; entity_block < n_entity_blocks; ++entity_block) {
@@ -782,37 +1059,47 @@ read_gmsh(std::string filename, int requested_grid_order)
         // for gmsh_file_format 4.1 the order of tag and dim is reversed,
         int tagEntity, dimEntity;
         infile >> dimEntity >> tagEntity >> cell_type >> numElements;
-        material_id = tag_maps[dimEntity][tagEntity];
+        material_id = tag_maps[dimEntity][tagEntity];                                   //THIS IS FROM READING THE ENTITIES (FIRST TWO INTEGERS OF THE PACK) - DEFAULT IS ALWAYS 0
 
-        const unsigned int cell_order = gmsh_cell_type_to_order(cell_type);
+        const unsigned int cell_order = gmsh_cell_type_to_order(cell_type);             //THIS IS CONVERTING THE MESH TYPE TO CELL ORDER FROM GMSH_READER.HPP
 
         unsigned int vertices_per_element = std::pow(2, dimEntity);
         unsigned int nodes_per_element = std::pow(cell_order + 1, dimEntity);
 
+        pcout << "************************************" << std::endl;
+        pcout << "Cell_type  = " << cell_type << std::endl;
+        pcout << "Cell Order = " << cell_order << std::endl;
+        pcout << "Dim entity = " << dimEntity << std::endl;
+        pcout << "verticies_per_element = " << vertices_per_element << std::endl;
+        pcout << "nodes_per_element = " << nodes_per_element << std::endl;
 
         for (unsigned int cell_per_entity = 0; cell_per_entity < numElements; ++cell_per_entity, ++global_cell) {
 
-            // ignore tag
+            // ignore tag (FIRST INDEX INSIDE LINE)
             int tag;
             infile >> tag;
 
-            if (dimEntity == dim) {
+            if (dimEntity == dim) {                                                         //THIS IS THE MAIN EXTRACTION BLOCK FOR STRUCTDIM = DIM CELL TEST CASES
                 // Found a cell
 
                 // Allocate and read indices
-                p1_cells.emplace_back(vertices_per_element);
-                high_order_cells.emplace_back(vertices_per_element);
+                p1_cells.emplace_back(vertices_per_element);                                //ADD ONE NEW CELL (CONSTRUCTOR) -> NOTE HERE WE ARE NOT USING SUBCELLDATA -> SIMPLY KEEP ADDING CELLS
+                high_order_cells.emplace_back(vertices_per_element);                        //SIMILARLY HERE, ADD ONE NEW CELL (CONSTRUCTOR)
 
-                auto &p1_vertices_id = p1_cells.back().vertices;
-                auto &high_order_vertices_id = high_order_cells.back().vertices;
+                auto &p1_vertices_id = p1_cells.back().vertices;                            //GET ADDRESS TO THAT VECTOR STARTING POINT
+                auto &high_order_vertices_id = high_order_cells.back().vertices;            //GET ADDRESS TO THAT VECTOR STARTING POINT
 
-                p1_vertices_id.resize(vertices_per_element);
-                high_order_vertices_id.resize(nodes_per_element);
+                p1_vertices_id.resize(vertices_per_element);                                //RESIZE THE VERTEX VECTOR
+                high_order_vertices_id.resize(nodes_per_element);                           //RESIZE THE VERTEX VECTOR
 
-                for (unsigned int i = 0; i < nodes_per_element; ++i) {
+                for (unsigned int i = 0; i < nodes_per_element; ++i) {                    //GET ALL THE NODE POINTS (INDEX - FROM GMSH)
                     infile >> high_order_vertices_id[i];
+//                    pcout << "Cell higher nodes -> " << high_order_vertices_id[i] << std::endl;
                 }
-                for (unsigned int i = 0; i < vertices_per_element; ++i) {
+
+//                pcout << "*******************************" << std::endl;
+
+                for (unsigned int i = 0; i < vertices_per_element; ++i) {                   //ONLY GET THE CORNER POINTS FOR THE QUADS (INDEX - FROM GMSH)
                     p1_vertices_id[i] = high_order_vertices_id[i];
                 }
 
@@ -820,11 +1107,17 @@ read_gmsh(std::string filename, int requested_grid_order)
                 Assert(material_id <= std::numeric_limits<dealii::types::material_id>::max(),
                        dealii::ExcIndexRange( material_id, 0, std::numeric_limits<dealii::types::material_id>::max()));
                 // we use only material_ids infile the range from 0 to dealii::numbers::invalid_material_id-1
-                AssertIndexRange(material_id, dealii::numbers::invalid_material_id);
+                AssertIndexRange(material_id, dealii::numbers::invalid_material_id);                                        //MATERIAL_ID CHECK FOR CELLS
 
+                //GET THE MATERIAL ID OF THAT CELL
                 p1_cells.back().material_id = material_id;
 
-                // transform from ucd to consecutive numbering
+                pcout << "Before for p1_cells" << std::endl;
+                for (auto aNode : high_order_cells.back().vertices){
+                    pcout << "Node : " << aNode << std::endl;
+                }
+
+                // transform from ucd to consecutive numbering                                                            (BASICALLY ALL INDEX - 1 TO MAKE INDEX START AT 0 INSTEAD OF 1)
                 for (unsigned int i = 0; i < vertices_per_element; ++i) {
                     //AssertThrow( vertex_indices.find(p1_cells.back().vertices[i]) != vertex_indices.end(),
                     //  dealii::ExcInvalidVertexIndexGmsh(global_cell, elm_number, p1_cells.back().vertices[i]));
@@ -832,36 +1125,53 @@ read_gmsh(std::string filename, int requested_grid_order)
                     // vertex with this index exists
                     p1_vertices_id[i] = vertex_indices[p1_cells.back().vertices[i]];
                 }
+
+                // transform from ucd to consecutive numbering                                                            (BASICALLY ALL INDEX - 1 TO MAKE INDEX START AT 0 INSTEAD OF 1)
                 for (unsigned int i = 0; i < nodes_per_element; ++i) {
                     high_order_vertices_id[i] = vertex_indices[high_order_cells.back().vertices[i]];
                 }
-            } else if (dimEntity == 1 && dimEntity < dim) {
+
+                //WE CAN CHANGE THE INDEX TO INDEX - 1 BECAUSE VERTEX_INDICES WERE CREATED USING A FOR LOOP STARTING WITH 0
+
+            } else if (dimEntity == 1 && dimEntity < dim) {                                 //THESE ARE FOR LINES FOR 2D CELLS
                 // Boundary info
-                subcelldata.boundary_lines.emplace_back(vertices_per_element);
-                auto &p1_vertices_id = subcelldata.boundary_lines.back().vertices;
-                p1_vertices_id.resize(vertices_per_element);
+                subcelldata.boundary_lines.emplace_back(vertices_per_element);              //USE EMPLACE_BACK TO CREATE A CELL WITH CONSTRUCTOR ARGS BEING PASSED  (WOULD TECHNICALLY ALWAYS BE 2 FOR LINES)
+                auto &p1_vertices_id = subcelldata.boundary_lines.back().vertices;          //STORE ADDRESS (STARTING POINT) OF THE VECTOR THAT STORES THE VERTICES OF THAT CELL
+                p1_vertices_id.resize(vertices_per_element);                                //RESIZE THE VECTOR TO VERTEX (2 VERTEX POINTS FOR LINE SEGMENT) -> WE ARE OVERWRITING THE VALUES OF SUBCELLDATA
 
-                temp_high_order_cells.vertices.resize(nodes_per_element);
+                temp_high_order_cells.vertices.resize(nodes_per_element);                   //DUMMY CELL TO STORE THE NODES OF THAT CELL (# NODE POINTS FOR LINE SEGMENTS)
 
-                for (unsigned int i = 0; i < nodes_per_element; ++i) {
+                for (unsigned int i = 0; i < nodes_per_element; ++i) {                      //READ THE NODE INDEX TO THE DUMMY CELL (INNER NODES)
                     infile >> temp_high_order_cells.vertices[i];
                 }
-                for (unsigned int i = 0; i < vertices_per_element; ++i) {
-                    p1_vertices_id[i] = temp_high_order_cells.vertices[i];
+
+                for (unsigned int i = 0; i < vertices_per_element; ++i) {                   //READ THE VERTEX POINTS (FIRST TWO POINT IN LINE SEGMENT)
+                    p1_vertices_id[i] = temp_high_order_cells.vertices[i];                  //THIS HAS THE SAME ADDRESSES AS THE SUBCELL DATA
                 }
 
                 // to make sure that the cast won't fail
                 Assert(material_id <= std::numeric_limits<dealii::types::boundary_id>::max(),
                        dealii::ExcIndexRange( material_id, 0, std::numeric_limits<dealii::types::boundary_id>::max()));
                 // we use only boundary_ids infile the range from 0 to dealii::numbers::internal_face_boundary_id-1
-                AssertIndexRange(material_id, dealii::numbers::internal_face_boundary_id);
+                AssertIndexRange(material_id, dealii::numbers::internal_face_boundary_id);                                          //BOUNDARY_ID CHECK FOR SUBCELLDATA
 
+                //CAST MATERIAL ID TO THE BOUNDARY ID OF THAT CELL (ACCESS BOUNDARY_ID ONLY WHEN REFERRING TO SUCELLDATA) -> look in documentation, this is suggested.
                 subcelldata.boundary_lines.back().boundary_id = static_cast<dealii::types::boundary_id>(material_id);
 
-                // transform from ucd to consecutive numbering
+//                pcout << "Before" << std::endl;
+//                for (unsigned int aNode : subcelldata.boundary_lines.back().vertices){
+//                    pcout << "Node : " << aNode << std::endl;
+//                }
+
+                // transform from ucd to consecutive numbering                                                              (BASICALLY SHIFT NODES FROM STARTING AT 1 TO STARTING AT 0)
                 for (unsigned int &vertex : subcelldata.boundary_lines.back().vertices) {
+
+                    pcout << "--------------------------------------------------------------" << std::endl;
+                    pcout << "Which Cell ? " << cell_per_entity <<  " | What is the size of this vector ? "  << subcelldata.boundary_lines.back().vertices.size() << std::endl;
+                    pcout << "What is Vertex ? -> " << vertex << std::endl;
                     if (vertex_indices.find(vertex) != vertex_indices.end()) {
-                      vertex = vertex_indices[vertex];
+                        pcout << "Cell type = " << cell_type << " | What is the vertex? -> " << vertex << std::endl;
+                        vertex = vertex_indices[vertex];
                     } else {
                         // no such vertex index
                         //AssertThrow(false, dealii::ExcInvalidVertexIndex(cell_per_entity, vertex));
@@ -869,7 +1179,14 @@ read_gmsh(std::string filename, int requested_grid_order)
                         std::abort();
                     }
                 }
-            } else if (dimEntity == 2 && dimEntity < dim) {
+
+//                pcout << "After" << std::endl;
+//                for (unsigned int aNode : subcelldata.boundary_lines.back().vertices){
+//                    pcout << "Node : " << aNode << std::endl;
+//                }
+
+            } else if (dimEntity == 2 && dimEntity < dim) {                     //THESE ARE FACES FOR 3D CELLS
+
                 // boundary info
                 subcelldata.boundary_quads.emplace_back(vertices_per_element);
                 auto &p1_vertices_id = subcelldata.boundary_quads.back().vertices;
@@ -902,7 +1219,7 @@ read_gmsh(std::string filename, int requested_grid_order)
                         vertex = dealii::numbers::invalid_unsigned_int;
                     }
                 }
-            } else if (cell_type == MSH_PNT) {
+            } else if (cell_type == MSH_PNT) {                      //MSH_PNT = 15 -> THESE ARE 0TH-ORDER POINTS THAT WE DO NOT WANT OR USE
               // read the indices of nodes given
               unsigned int node_index = 0;
               infile >> node_index;
@@ -917,7 +1234,7 @@ read_gmsh(std::string filename, int requested_grid_order)
             }
         } // End of cell per entity
     } // End of entity block
-    AssertDimension(global_cell, n_cells);
+    AssertDimension(global_cell, n_cells);                  //MAKE SURE THAT PARSING THROUGH ALL CELLS, WE HAVE THE SAME NUMBER
 
     // Assert we reached the end of the block
     infile >> line;
@@ -926,12 +1243,10 @@ read_gmsh(std::string filename, int requested_grid_order)
     //            PHiLiP::ExcInvalidGMSHInput(line));
   
     // check that no forbidden arrays are used
-    Assert(subcelldata.check_consistency(dim), dealii::ExcInternalError());
-  
-  
+    Assert(subcelldata.check_consistency(dim), dealii::ExcInternalError());                                             //MAKE SURE BOUNDARY_ID AND BOUNDARY_QUADS EMPTY IF DIM = 1, AND IF BOUNDARY_QUADS EMPTY IF DIM = 2
+
     AssertThrow(infile, dealii::ExcIO());
-  
-  
+
     // // check that we actually read some p1_cells.
     // AssertThrow(p1_cells.size() > 0, dealii::ExcGmshNoCellInformation());
   
@@ -942,116 +1257,204 @@ read_gmsh(std::string filename, int requested_grid_order)
     if (dim == spacedim) {
       dealii::GridReordering<dim, spacedim>::invert_all_cells_of_negative_grid(vertices, p1_cells);
     }
-    dealii::GridReordering<dim, spacedim>::reorder_cells(p1_cells);
-    triangulation->create_triangulation_compatibility(vertices, p1_cells, subcelldata);
 
-    triangulation->repartition();
+    /**
+     * THE SIZE OF P1_CELLS SHOULD BE EQUAL TO THE NUMBER OF CELLS THAT IS OF DIMENSION == STRUCTDIM
+     */
+    pcout << "What is the size of p1_cells ? -> " << p1_cells.size() << std::endl;
+
+    dealii::GridReordering<dim, spacedim>::reorder_cells(p1_cells);                                     //REORDERS THE CELLS BASED ON DEALII INTERPRETATION (DIRECTION OF SHARED EDGES MUST POINT IN THE SAME DIRECTION FOR ADJACENT CELLS)
+
+    triangulation->create_triangulation_compatibility(vertices, p1_cells, subcelldata);                 //CALLS CREATE_TRIANGULATION INTERNALLY
+
+    triangulation->repartition();                                                                       //REPARTITION FOR CALLING GRID OUT FOR EACH PROCESSORS
 
     dealii::GridOut gridout;
-    gridout.write_mesh_per_processor_as_vtu(*(high_order_grid->triangulation), "tria");
-  
+    gridout.write_mesh_per_processor_as_vtu(*(high_order_grid->triangulation), "tria");                 //THIS ONLY WRITES THE VERTICES TO THE OUTPUT FILE
+
+    /**
+     * HERE WE HAVE WRITTEN OUT THE GRID FOR THE VERTICES (NO INNER NODES YET)
+     */
+
     // in 1d, we also have to attach boundary ids to vertices, which does not
     // currently work through the call above
     if (dim == 1) {
         assign_1d_boundary_ids(boundary_ids_1d, *triangulation);
     }
 
-    high_order_grid->initialize_with_triangulation_manifold();
+    high_order_grid->initialize_with_triangulation_manifold();                                          //INITIALIZE A MANIFOLD FOR TRACKING HIGHER ORDER GEOMETRY (CURVED GRID)
 
     std::vector<unsigned int> deal_h2l = dealii::FETools::hierarchic_to_lexicographic_numbering<dim>(grid_order);
     std::vector<unsigned int> deal_l2h = dealii::Utilities::invert_permutation(deal_h2l);
+    std::vector<unsigned int> gmsh_h2l = gmsh_hierarchic_to_lexicographic<dim>(grid_order);                     //PHYSICAL INTERPRETATION OF THE NODES
+    std::vector<unsigned int> gmsh_l2h = dealii::Utilities::invert_permutation(gmsh_h2l);                       //PHYSICAL INTERPRETATION BACK TO GMSH
 
-    std::vector<unsigned int> gmsh_h2l = gmsh_hierarchic_to_lexicographic<dim>(grid_order);
-    std::vector<unsigned int> gmsh_l2h = dealii::Utilities::invert_permutation(gmsh_h2l);
+    pcout << "Print out gmsh_h2l" << std::endl;
+    for (unsigned int aInt : gmsh_h2l) {
+        pcout << aInt << std::endl;
+    }
 
-    // Visualize indexing
-    // for (unsigned int deg = 1; deg < 7; ++deg) {
-    //     std::cout << "DEGREE " << deg << std::endl;
-    //     {
-    //         std::vector<unsigned int> h2l = gmsh_hierarchic_to_lexicographic<dim>(deg);
-    //         std::vector<unsigned int> l2h = dealii::Utilities::invert_permutation(h2l);
 
-    //         unsigned int n = deg+1;
-    //         std::cout << "GMSH L2H "  << std::endl;
-    //         for (int j=n-1; j>=0; --j) {
-    //             for (unsigned int i=0; i<n; ++i) {
-    //                 const unsigned int ij = ij_to_num(i,j,n);
-    //                 std::cout << l2h[ij] << " ";
-    //             }
-    //             std::cout << std::endl;
-    //         }
+//    pcout << "Print gmsh_h2l for dim = " << dim << " | order = " << grid_order << std::endl;
+//    for (auto aIndex : gmsh_h2l) {
+//        pcout << aIndex << " ";
+//    }
+//
+//    pcout << "Print deal_h2l for dim = " << dim << " | order = " << grid_order << std::endl;
+//    for (auto aIndex : deal_h2l) {
+//        pcout << aIndex << " ";
+//    }
 
-    //         std::cout << std::endl << std::endl;
-    //     }
-    //     {
-    //         std::vector<unsigned int> h2l = dealii::FETools::hierarchic_to_lexicographic_numbering<dim>(deg);
-    //         std::vector<unsigned int> l2h = dealii::Utilities::invert_permutation(h2l);
+//    for (unsigned int deg = 1; deg < 7; ++deg) {
+//        pcout << "DEGREE " << deg << std::endl;
+//        {
+//         std::vector<unsigned int> h2l = gmsh_hierarchic_to_lexicographic<dim>(deg);
+//         std::vector<unsigned int> l2h = dealii::Utilities::invert_permutation(h2l);
+//
+//         unsigned int n = deg+1;
+//         pcout << "GMSH L2H "  << std::endl;
+//         for (int j=n-1; j>=0; --j) {
+//             for (unsigned int i=0; i<n; ++i) {
+//                 const unsigned int ij = ij_to_num(i,j,n);
+//                 pcout << l2h[ij] << " ";
+//             }
+//             pcout << std::endl;
+//         }
+//
+//         pcout << "GMSH H2L "  << std::endl;
+//         for (int j=n-1; j>=0; --j) {
+//             for (unsigned int i=0; i<n; ++i) {
+//                 const unsigned int ij = ij_to_num(i,j,n);
+//                 pcout << h2l[ij] << " ";
+//             }
+//             pcout << std::endl;
+//         }
+//
+//         pcout << std::endl << std::endl;
+//         }
+//
+//        {
+//            std::vector<unsigned int> h2l = dealii::FETools::hierarchic_to_lexicographic_numbering<dim>(deg);
+//            std::vector<unsigned int> l2h = dealii::Utilities::invert_permutation(h2l);
+//
+//            unsigned int n = deg+1;
+//            pcout << "DEAL L2H "  << std::endl;
+//            for (int j=n-1; j>=0; --j) {
+//                for (unsigned int i=0; i<n; ++i) {
+//                    const unsigned int ij = ij_to_num(i,j,n);
+//                    pcout << l2h[ij] << " ";
+//                }
+//                pcout << std::endl;
+//            }
+//
+//            pcout << "DEAL H2L "  << std::endl;
+//            for (int j=n-1; j>=0; --j) {
+//                for (unsigned int i=0; i<n; ++i) {
+//                    const unsigned int ij = ij_to_num(i,j,n);
+//                    pcout << h2l[ij] << " ";
+//                }
+//                pcout << std::endl;
+//            }
+//            pcout << std::endl << std::endl;
+//        }
+//    }
 
-    //         unsigned int n = deg+1;
-    //         std::cout << "DEAL L2H "  << std::endl;
-    //         for (int j=n-1; j>=0; --j) {
-    //             for (unsigned int i=0; i<n; ++i) {
-    //                 const unsigned int ij = ij_to_num(i,j,n);
-    //                 std::cout << l2h[ij] << " ";
-    //             }
-    //             std::cout << std::endl;
-    //         }
 
-    //         std::cout << std::endl << std::endl;
-    //     }
-    // }
-    // std::abort();
+    pcout << "dim ?? -> " << dim << std::endl;
+    pcout << "Grid Order ?? -> " << grid_order << std::endl;
+
+    std::abort();
+    pcout << std::endl;
 
     int icell = 0;
-    std::vector<dealii::types::global_dof_index> dof_indices(high_order_grid->fe_system.dofs_per_cell);
+    std::vector<dealii::types::global_dof_index> dof_indices(high_order_grid->fe_system.dofs_per_cell);                 //CREATING A VECTOR OF GLOBAL_DOF INDEX WITH SIZE DOFS PER CELL (NOTE HERE WE HAVE DOFS FOR X AND Y)
+    pcout << "dofs_per_cell = " << high_order_grid->fe_system.dofs_per_cell << std::endl;
+    pcout << "size of vector dof_indices = " << dof_indices.size() << std::endl;
 
-    //for (unsigned int i=0; i<all_vertices.size(); ++i) {
-    //    std::cout << " i " << i 
-    //              << " maps to global id " 
-    //              << " vertices high_order_vertices_id[i] << " point " << all_vertices[high_order_vertices_id[i]] << std::endl;
-    //}
+//    for (unsigned int i=0; i<all_vertices.size(); ++i) {
+//        std::cout << " i " << i
+//                  << " maps to global id "
+//                  << " vertices high_order_vertices_id[i] << " point " << all_vertices[high_order_vertices_id[i]] << std::endl;
+//    }
+
+    /**
+     * THIS IS WHERE WE START TO CHANGE THE LEXICOGRAPHICAL ORDERING AND ALSO, WHERE WE PLACE THE NODES INTO DEALII
+     */
+
     for (const auto &cell : high_order_grid->dof_handler_grid.active_cell_iterators()) {
-        if (cell->is_locally_owned()) {
-            auto &high_order_vertices_id = high_order_cells[icell].vertices;
+        if (cell->is_locally_owned()) {                                               //IF CELL IS OWNED BY THIS PROCESSOR
+            auto &high_order_vertices_id = high_order_cells[icell].vertices;          //ACCESS THE CELLS IN THE HIGH_ORDER_CELLS -> ALL THE NODES STORED PREVIOUSLY (INNER NODES)
 
             //for (unsigned int i=0; i<high_order_vertices_id.size(); ++i) {
             //    std::cout << " I " << high_order_vertices_id[i] << " point " << all_vertices[high_order_vertices_id[i]] << std::endl;
             //}
-            cell->get_dof_indices(dof_indices);
+            cell->get_dof_indices(dof_indices);                                         //BASICALLY ALLOCATE THE DOF_INDICES FROM THIS CELL INTO THE EMPTY DOF_INDICES
 
-            //std::cout << " cell " << icell << " with vertices: " << std::endl;
-            //for (unsigned int i=0; i < cell->n_vertices(); ++i) {
-            //    std::cout << cell->vertex(i) << std::endl;
-            //}
-            //std::cout << " highordercell with vertices: " << std::endl;
+//            pcout << "dof_indices" << std::endl;
+//            for (int j=grid_order; j>=0; --j) {
+//                for (unsigned int i=0; i<grid_order+1; ++i) {
+//                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
+//                    pcout << dof_indices[ij] << " ";
+//                }
+//                pcout << std::endl;
+//            }
 
             std::vector<unsigned int> rotate_z90degree;
             rotate_indices<dim>(rotate_z90degree, grid_order+1, 'Z');
 
             bool good_rotation = false;
 
+            //HIEARCHICAL ORDERING FROM GMSH
             auto high_order_vertices_id_lexico = high_order_vertices_id;
             for (unsigned int ihierachic=0; ihierachic<high_order_vertices_id.size(); ++ihierachic) {
                 const unsigned int lexico_id = gmsh_h2l[ihierachic];
                 high_order_vertices_id_lexico[lexico_id] = high_order_vertices_id[ihierachic];
             }
 
+            //NOW, THE HIGHER_ORDER_VERTICES_ID_LEXICO IS IN THE LEXICOGRAPHICAL ORDER OF GMSH
+            pcout << "Before Rotation" << std::endl;
+            for (int j=grid_order; j>=0; --j) {
+                for (unsigned int i=0; i<grid_order+1; ++i) {
+                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
+                    pcout << high_order_vertices_id_lexico[ij] << " ";
+                }
+                pcout << std::endl;
+            }
+
             //auto high_order_vertices_id_rotated = high_order_cells[icell].vertices;
             auto high_order_vertices_id_rotated = high_order_vertices_id_lexico;
-            for (int zr = 0; zr < 4; ++zr) {
-                
+
+            pcout << "HIGHER_ORDER_VERTICES_ID_ROTATE" << std::endl;
+            for (int j=grid_order; j>=0; --j) {
+                for (unsigned int i=0; i<grid_order+1; ++i) {
+                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
+                    pcout << high_order_vertices_id_rotated[ij] << " ";
+                }
+                pcout << std::endl;
+            }
+
+            pcout << "PRINT ME ALL THE VERTICES" << std::endl;
+
+            /**
+             * HIGHER_ORDER_VERTICES_ID_ROTATE HAS THE SAME ORDERING AS THE GMSH ONE (WHAT WE DOING HERE IS TO MATCH THE GMSH LEXICOGRAPHICAL ORDERING TO THE CELL POINTS)
+             */
+            for (int zr = 0; zr < 4; ++zr) {                                                                            //FOR QUADS
+
                 std::vector<int> matching(cell->n_vertices());
                 for (unsigned int i_vertex=0; i_vertex < cell->n_vertices(); ++i_vertex) {
 
                     const unsigned int base_index = i_vertex;
-                    const unsigned int lexicographic_index = deal_h2l[base_index];
+                    const unsigned int lexicographic_index = deal_h2l[base_index];                                      //MAP IT BACK, THESE ARE POSITIONS INDEX, SO GET THE LEXICOGRAHICAL_INDEX OF DEALII AND MAP IT BACK
 
                     //const unsigned int gmsh_hierarchical_index = gmsh_l2h[lexicographic_index];
                     //const unsigned int vertex_id = high_order_vertices_id_rotated[gmsh_hierarchical_index];
                     const unsigned int vertex_id = high_order_vertices_id_rotated[lexicographic_index];
-                    const dealii::Point<dim,double> high_order_vertex = all_vertices[vertex_id];
+                    const dealii::Point<dim,double> high_order_vertex = all_vertices[vertex_id];                        //ALL_VERTICES IS IN HIERARCHICAL ORDER WITH POINTS (SO VERTEX_ID HITS BANG ON)
                     //std::cout << high_order_vertex << std::endl;
 
+                    //.I.E. 0 4 20 24 5 -> POSITION 1 IS 4, SO FIRST NODE IN DEALII ORDERING WOULD BE AT POSITION 4 IN THE LEXICOGRPAHICAL ORDERING GENERATED BY GMSH
+
+                    //THIS IS JUST TO SEE IF THE HIGHER ORDER NODES ARE FOUND (TECHNICALLY, WE SHOULD BE ONLY TARGETING 2D NODES, NOT THE 1D) -> THIS SHOULD BE FILTERED OUT FROM HIGH_ORDER_VERTEX
                     bool found = false;
                     for (unsigned int i=0; i < cell->n_vertices(); ++i) {
                         if (cell->vertex(i) == high_order_vertex) {
@@ -1064,6 +1467,7 @@ read_gmsh(std::string filename, int requested_grid_order)
                         std::abort();
                     }
 
+                    //THIS IS THE STATEMENT WE NEED TO LOOK FOR (WHETHER THE VERTEX IS AT THE GOOD LOCATION
                     matching[i_vertex] = (high_order_vertex == cell->vertex(i_vertex)) ? 0 : 1;
                 }
 
@@ -1082,13 +1486,46 @@ read_gmsh(std::string filename, int requested_grid_order)
                 for (unsigned int i=0; i<high_order_vertices_id.size(); ++i) {
                     high_order_vertices_id_rotated[i] = high_order_vertices_id[rotate_z90degree[i]];
                 }
+
+                pcout << zr << "th rotation " << std::endl;
+                for (int j=grid_order; j>=0; --j) {
+                    for (unsigned int i=0; i<grid_order+1; ++i) {
+                        const unsigned int ij = ij_to_num(i,j,grid_order+1);
+                        pcout << high_order_vertices_id_rotated[ij] << " ";
+                    }
+                    pcout << std::endl;
+                }
+
+                pcout << "zr = " << zr << std::endl;
+
             }
+
+            pcout << "Cell Vertices - (X,Y)" << std::endl;
+            for (int j=grid_order; j>=0; --j) {
+                for (unsigned int i=0; i<grid_order+1; ++i) {
+                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
+                    pcout << "(" << cell->vertex(ij) << ")" << " ";
+                }
+                pcout << std::endl;
+            }
+
+            pcout << "GMSH VERTICES - (X,Y)" << std::endl;
+            for (int j=grid_order; j>=0; --j) {
+                for (unsigned int i=0; i<grid_order+1; ++i) {
+                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
+                    pcout << "(" << all_vertices[high_order_vertices_id_rotated[ij]]<< ")" << " ";
+                }
+                pcout << std::endl;
+            }
+
             if (!good_rotation) {
                 std::cout << "Couldn't find rotation..." << std::endl;
                 std::abort();
-            } 
+            }
 
-
+            /**
+             * UP TO TIHS POINT, GMSH POINTS MATCHES POINTS (EVERY) IN THE CELL
+             */
 
             for (unsigned int i_vertex = 0; i_vertex < high_order_vertices_id.size(); ++i_vertex) {
 
@@ -1110,7 +1547,7 @@ read_gmsh(std::string filename, int requested_grid_order)
                     //          << " i_vertex " << i_vertex
                     //          << " i_dim " << d
                     //          << " base_index " << base_index
-                    //          << " shape_index " << shape_index 
+                    //          << " shape_index " << shape_index
                     //          << " idof_global " << idof_global
                     //          << " lexicographic_index " << lexicographic_index
                     //          //<< " gmsh_hierarchical_index " << gmsh_hierarchical_index
@@ -1120,13 +1557,25 @@ read_gmsh(std::string filename, int requested_grid_order)
                 }
                 //std::cout << std::endl;
             }
+
+            pcout << "Final gsmh_h2l " << std::endl;
+            for (int j=grid_order; j>=0; --j) {
+                for (unsigned int i=0; i<grid_order+1; ++i) {
+                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
+                    pcout << high_order_vertices_id_rotated[ij] << " ";
+                }
+                pcout << std::endl;
+            }
+
         }
         icell++;
     }
+
+    //DONE WITH THE ROTATIONS, NOW READ THE NODES INSIDE HIGHER ORDER GRID
+
     high_order_grid->volume_nodes.update_ghost_values();
     high_order_grid->ensure_conforming_mesh();
 
-    
     /// Convert the equidistant points from Gmsh into the GLL points used by FE_Q in deal.II.
     {
         std::vector<dealii::Point<1>> equidistant_points(grid_order+1);
@@ -1155,13 +1604,13 @@ read_gmsh(std::string filename, int requested_grid_order)
     high_order_grid->update_mapping_fe_field();
     high_order_grid->output_results_vtk(9999);
     high_order_grid->reset_initial_nodes();
-    
+
     //return high_order_grid;
 
     if (requested_grid_order > 0) {
         auto grid = std::make_shared<HighOrderGrid<dim, double>>(requested_grid_order, triangulation);
         grid->initialize_with_triangulation_manifold();
-        
+
         /// Convert the mesh by interpolating from one order to another.
         {
             std::vector<dealii::Point<1>> equidistant_points(grid_order+1);
