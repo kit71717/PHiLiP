@@ -712,21 +712,22 @@ gmsh_hierarchic_to_lexicographic(const unsigned int degree)
 
             // line 5
             for (unsigned int i = 0; i < dofs_per_line; ++i) {
-                h2l[next_index++] = (i + 1) + n * degree;
-                pcout << "line 5 - " << (i + 1) + n * degree << std::endl;
+                h2l[next_index++] = n * n - (i + 1) - 1;
+                pcout << "line 5 - " << n * n - (i + 1) - 1 << std::endl;
             }
 
             // line 6
             for (unsigned int i = 0; i < dofs_per_line; ++i) {
-                h2l[next_index++] = (degree * n + (n * n * i)) + degree;
-                pcout << "line 6 - " << (degree * n + (n * n * (i + 1))) + degree << std::endl;
+                h2l[next_index++] = (degree * n + (n * n * (i+1))) + degree;
+                pcout << "line 6 - " << (degree * n + (n * n * (i+1))) + degree << std::endl;
             }
 
             // line 7
             for (unsigned int i = 0; i < dofs_per_line; ++i) {
-                h2l[next_index++] = degree * n + (n * n * i);
-                pcout << "line 7 - " << degree * n + (n * n * (i + 1)) << std::endl;
+                h2l[next_index++] = (degree * n + (n * n * (i+1)));
+                pcout << "line 7 - " << (degree * n + (n * n * (i+1))) << std::endl;
             }
+
             // line 8
             for (unsigned int i = 0; i < dofs_per_line; ++i) {
                 h2l[next_index++] = (n * n) * degree + (i + 1);
@@ -745,8 +746,8 @@ gmsh_hierarchic_to_lexicographic(const unsigned int degree)
             }
             // line 11
             for (unsigned int i = 0; i < dofs_per_line; ++i) {
-                h2l[next_index++] = (i + 1) + n * degree + (n * n) * degree;
-                pcout << "line 11 - " << (i + 1) + n * degree + (n * n) * degree << std::endl;
+                h2l[next_index++] = n * n * n - 1 - (i + 1);
+                pcout << "line 11 - " << n * n * n - 1 - (i + 1) << std::endl;
             }
 
             // inside quads
@@ -856,8 +857,10 @@ gmsh_hierarchic_to_lexicographic(const unsigned int degree)
                 /**
                  * Once this is out, we need to do some node processing, since the nodes are not at the correct spots
                  * Use the global index information to track it, i.e., get the transformed indices, and allocate them
-                 * to the global index. This would make sense since the global index are always true.
+                 * to the global index. This would make sense since the global index are always true for both GMSH and DEAL.II
                  */
+
+                pcout << "Begin recursive call to inner cube" << std::endl;
                 recursive_3D_nodes = gmsh_hierarchic_to_lexicographic<dim>(degree - 2);
 
                 pcout << "Printing recursive_3D_nodes" << std::endl;
@@ -876,7 +879,7 @@ gmsh_hierarchic_to_lexicographic(const unsigned int degree)
         }
 
         pcout << "Next_index = " << next_index << std::endl;
-        Assert(next_index == dofs_per_cell, dealii::ExcInternalError());
+//        Assert(next_index == dofs_per_cell, dealii::ExcInternalError());
 
         break;
 
@@ -915,10 +918,12 @@ read_gmsh(std::string filename, int requested_grid_order)
 
     const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
     dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+
+
     pcout << "dim = " << dim << std::endl;
     pcout << "spacedim = " << dim << std::endl;
 
-    Assert(dim==2, dealii::ExcInternalError());
+//    Assert(dim==2, dealii::ExcInternalError());                               //COMMENT THIS OUT BECAUSE WE NOW TEST 3D GMSH
     std::ifstream infile;
 
     open_file_toRead(filename, infile);
@@ -1287,83 +1292,11 @@ read_gmsh(std::string filename, int requested_grid_order)
     std::vector<unsigned int> deal_h2l = dealii::FETools::hierarchic_to_lexicographic_numbering<dim>(grid_order);
     std::vector<unsigned int> deal_l2h = dealii::Utilities::invert_permutation(deal_h2l);
     std::vector<unsigned int> gmsh_h2l = gmsh_hierarchic_to_lexicographic<dim>(grid_order);                     //PHYSICAL INTERPRETATION OF THE NODES
-    std::vector<unsigned int> gmsh_l2h = dealii::Utilities::invert_permutation(gmsh_h2l);                       //PHYSICAL INTERPRETATION BACK TO GMSH
-
-    pcout << "Print out gmsh_h2l" << std::endl;
-    for (unsigned int aInt : gmsh_h2l) {
-        pcout << aInt << std::endl;
-    }
-
-
-//    pcout << "Print gmsh_h2l for dim = " << dim << " | order = " << grid_order << std::endl;
-//    for (auto aIndex : gmsh_h2l) {
-//        pcout << aIndex << " ";
-//    }
-//
-//    pcout << "Print deal_h2l for dim = " << dim << " | order = " << grid_order << std::endl;
-//    for (auto aIndex : deal_h2l) {
-//        pcout << aIndex << " ";
-//    }
-
-//    for (unsigned int deg = 1; deg < 7; ++deg) {
-//        pcout << "DEGREE " << deg << std::endl;
-//        {
-//         std::vector<unsigned int> h2l = gmsh_hierarchic_to_lexicographic<dim>(deg);
-//         std::vector<unsigned int> l2h = dealii::Utilities::invert_permutation(h2l);
-//
-//         unsigned int n = deg+1;
-//         pcout << "GMSH L2H "  << std::endl;
-//         for (int j=n-1; j>=0; --j) {
-//             for (unsigned int i=0; i<n; ++i) {
-//                 const unsigned int ij = ij_to_num(i,j,n);
-//                 pcout << l2h[ij] << " ";
-//             }
-//             pcout << std::endl;
-//         }
-//
-//         pcout << "GMSH H2L "  << std::endl;
-//         for (int j=n-1; j>=0; --j) {
-//             for (unsigned int i=0; i<n; ++i) {
-//                 const unsigned int ij = ij_to_num(i,j,n);
-//                 pcout << h2l[ij] << " ";
-//             }
-//             pcout << std::endl;
-//         }
-//
-//         pcout << std::endl << std::endl;
-//         }
-//
-//        {
-//            std::vector<unsigned int> h2l = dealii::FETools::hierarchic_to_lexicographic_numbering<dim>(deg);
-//            std::vector<unsigned int> l2h = dealii::Utilities::invert_permutation(h2l);
-//
-//            unsigned int n = deg+1;
-//            pcout << "DEAL L2H "  << std::endl;
-//            for (int j=n-1; j>=0; --j) {
-//                for (unsigned int i=0; i<n; ++i) {
-//                    const unsigned int ij = ij_to_num(i,j,n);
-//                    pcout << l2h[ij] << " ";
-//                }
-//                pcout << std::endl;
-//            }
-//
-//            pcout << "DEAL H2L "  << std::endl;
-//            for (int j=n-1; j>=0; --j) {
-//                for (unsigned int i=0; i<n; ++i) {
-//                    const unsigned int ij = ij_to_num(i,j,n);
-//                    pcout << h2l[ij] << " ";
-//                }
-//                pcout << std::endl;
-//            }
-//            pcout << std::endl << std::endl;
-//        }
-//    }
-
+//    std::vector<unsigned int> gmsh_l2h = dealii::Utilities::invert_permutation(gmsh_h2l);                       //PHYSICAL INTERPRETATION BACK TO GMSH
 
     pcout << "dim ?? -> " << dim << std::endl;
     pcout << "Grid Order ?? -> " << grid_order << std::endl;
 
-    std::abort();
     pcout << std::endl;
 
     int icell = 0;
@@ -1371,33 +1304,17 @@ read_gmsh(std::string filename, int requested_grid_order)
     pcout << "dofs_per_cell = " << high_order_grid->fe_system.dofs_per_cell << std::endl;
     pcout << "size of vector dof_indices = " << dof_indices.size() << std::endl;
 
-//    for (unsigned int i=0; i<all_vertices.size(); ++i) {
-//        std::cout << " i " << i
-//                  << " maps to global id "
-//                  << " vertices high_order_vertices_id[i] << " point " << all_vertices[high_order_vertices_id[i]] << std::endl;
-//    }
-
     /**
      * THIS IS WHERE WE START TO CHANGE THE LEXICOGRAPHICAL ORDERING AND ALSO, WHERE WE PLACE THE NODES INTO DEALII
      */
 
     for (const auto &cell : high_order_grid->dof_handler_grid.active_cell_iterators()) {
+
         if (cell->is_locally_owned()) {                                               //IF CELL IS OWNED BY THIS PROCESSOR
+
             auto &high_order_vertices_id = high_order_cells[icell].vertices;          //ACCESS THE CELLS IN THE HIGH_ORDER_CELLS -> ALL THE NODES STORED PREVIOUSLY (INNER NODES)
 
-            //for (unsigned int i=0; i<high_order_vertices_id.size(); ++i) {
-            //    std::cout << " I " << high_order_vertices_id[i] << " point " << all_vertices[high_order_vertices_id[i]] << std::endl;
-            //}
             cell->get_dof_indices(dof_indices);                                         //BASICALLY ALLOCATE THE DOF_INDICES FROM THIS CELL INTO THE EMPTY DOF_INDICES
-
-//            pcout << "dof_indices" << std::endl;
-//            for (int j=grid_order; j>=0; --j) {
-//                for (unsigned int i=0; i<grid_order+1; ++i) {
-//                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
-//                    pcout << dof_indices[ij] << " ";
-//                }
-//                pcout << std::endl;
-//            }
 
             std::vector<unsigned int> rotate_z90degree;
             rotate_indices<dim>(rotate_z90degree, grid_order+1, 'Z');
@@ -1409,31 +1326,24 @@ read_gmsh(std::string filename, int requested_grid_order)
             for (unsigned int ihierachic=0; ihierachic<high_order_vertices_id.size(); ++ihierachic) {
                 const unsigned int lexico_id = gmsh_h2l[ihierachic];
                 high_order_vertices_id_lexico[lexico_id] = high_order_vertices_id[ihierachic];
-            }
-
-            //NOW, THE HIGHER_ORDER_VERTICES_ID_LEXICO IS IN THE LEXICOGRAPHICAL ORDER OF GMSH
-            pcout << "Before Rotation" << std::endl;
-            for (int j=grid_order; j>=0; --j) {
-                for (unsigned int i=0; i<grid_order+1; ++i) {
-                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
-                    pcout << high_order_vertices_id_lexico[ij] << " ";
-                }
-                pcout << std::endl;
+                std::cout << "hierchical = " << ihierachic << " + high_order_vertices_id[ihierachic] = " << high_order_vertices_id[ihierachic] + 1 << " + coord = X - Y - Z = " << all_vertices[high_order_vertices_id[ihierachic]] << std::endl;
             }
 
             //auto high_order_vertices_id_rotated = high_order_cells[icell].vertices;
             auto high_order_vertices_id_rotated = high_order_vertices_id_lexico;
 
-            pcout << "HIGHER_ORDER_VERTICES_ID_ROTATE" << std::endl;
-            for (int j=grid_order; j>=0; --j) {
-                for (unsigned int i=0; i<grid_order+1; ++i) {
-                    const unsigned int ij = ij_to_num(i,j,grid_order+1);
-                    pcout << high_order_vertices_id_rotated[ij] << " ";
-                }
-                pcout << std::endl;
+            std::cout << "Print me the number of vertices = " << cell->n_vertices() << std::endl;
+
+            std::cout << "Print me the cell points " << std::endl;
+            for (unsigned int i=0; i < pow(grid_order+1,dim); ++i) {
+                std::cout << cell->vertex(i) << std::endl;
             }
 
-            pcout << "PRINT ME ALL THE VERTICES" << std::endl;
+            std::cout << "Next set of points" << std::endl;
+
+            for (auto aID : high_order_vertices_id_rotated) {
+                std::cout << all_vertices[aID] << std::endl;
+            }
 
             /**
              * HIGHER_ORDER_VERTICES_ID_ROTATE HAS THE SAME ORDERING AS THE GMSH ONE (WHAT WE DOING HERE IS TO MATCH THE GMSH LEXICOGRAPHICAL ORDERING TO THE CELL POINTS)
@@ -1441,7 +1351,7 @@ read_gmsh(std::string filename, int requested_grid_order)
             for (int zr = 0; zr < 4; ++zr) {                                                                            //FOR QUADS
 
                 std::vector<int> matching(cell->n_vertices());
-                for (unsigned int i_vertex=0; i_vertex < cell->n_vertices(); ++i_vertex) {
+                for (unsigned int i_vertex=0; i_vertex < cell->n_vertices(); ++i_vertex) {                              //ONLY VERTEX POINTS
 
                     const unsigned int base_index = i_vertex;
                     const unsigned int lexicographic_index = deal_h2l[base_index];                                      //MAP IT BACK, THESE ARE POSITIONS INDEX, SO GET THE LEXICOGRAHICAL_INDEX OF DEALII AND MAP IT BACK
@@ -1462,8 +1372,9 @@ read_gmsh(std::string filename, int requested_grid_order)
                             found = true;
                         }
                     }
+
                     if (!found) {
-                        std::cout << "Wrong cell... High order nodes do not match the cell's vertices." << std::endl;
+                        std::cout << "Wrong cell... High order nodes do not match the cell's vertices | " << "mpi_rank = " << mpi_rank << std::endl;
                         std::abort();
                     }
 
