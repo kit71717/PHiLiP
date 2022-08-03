@@ -81,6 +81,9 @@ namespace PHiLiP {
             {
                 // Rotate xy-plane
                 // counter-clockwise
+                // 3 6 2           2 5 1
+                // 7 8 5  becomes  6 8 4
+                // 0 4 1           3 7 0
                 case 'z':
                     for (unsigned int iz = 0; iz < ((dim > 2) ? n : 1); ++iz)
                         for (unsigned int j = 0; j < n; ++j)
@@ -92,12 +95,29 @@ namespace PHiLiP {
                     break;
                     // Rotate xy-plane
                     // clockwise
+                    // 3 6 2           0 7 3
+                    // 7 8 5  becomes  4 8 6
+                    // 0 4 1           1 5 2
                 case 'Z':
                     for (unsigned int iz = 0; iz < ((dim > 2) ? n : 1); ++iz)
                         for (unsigned int iy = 0; iy < n; ++iy)
                             for (unsigned int ix = 0; ix < n; ++ix)
                             {
                                 unsigned int k = n * ix - iy + n - 1 + n * n * iz;
+                                numbers[k]     = l++;
+                            }
+                    break;
+                    // Change Z normal
+                    // Instead of
+                    // 3 6 2           1 5 2
+                    // 7 8 5  becomes  4 8 6
+                    // 0 4 1           0 7 3
+                case '3':
+                    for (unsigned int iz = 0; iz < ((dim > 2) ? n : 1); ++iz)
+                        for (unsigned int iy = 0; iy < n; ++iy)
+                            for (unsigned int ix = 0; ix < n; ++ix)
+                            {
+                                unsigned int k = iy + n * ix + n * n * iz; // transpose x and y indices
                                 numbers[k]     = l++;
                             }
                     break;
@@ -139,7 +159,7 @@ namespace PHiLiP {
                             for (unsigned int ix = 0; ix < n; ++ix)
                             {
                                 unsigned int k = (ix) * n + n - (iy + 1) + (n * n * iz);
-                                std::cout << "k = " << k << std::endl;
+//                                std::cout << "k = " << k << std::endl;
                                 numbers[k]     = l++;
                             }
                     break;
@@ -150,7 +170,7 @@ namespace PHiLiP {
                             for (unsigned int ix = 0; ix < n; ++ix)
                             {
                                 unsigned int k = (ix) + (n * (n-1)) + (n * n * iy) - (n * iz);
-                                std::cout << "k = " << k << std::endl;
+//                                std::cout << "k = " << k << std::endl;
                                 numbers[k] = l++;
                             }
                     break;
@@ -161,17 +181,18 @@ namespace PHiLiP {
                             for (unsigned int ix = 0; ix < n; ++ix)
                             {
                                 unsigned int k = (ix * n * n) + (n - 1) + (iy * n) - (iz);
-                                std::cout << "k = " << k << std::endl;
+//                                std::cout << "k = " << k << std::endl;
                                 numbers[k] = l++;
                             }
                     break;
+                    // Flip Cube
                 case 'F':
                     for (unsigned int iz = 0; iz < n; ++iz)
                         for (unsigned int iy = 0; iy < n; ++iy)
                             for (unsigned int ix = 0; ix < n; ++ix)
                             {
                                 unsigned int k = (n * (n - 1)) + ix - (iy * n) + (n * n * iz);
-                                std::cout << "k = " << k << std::endl;
+//                                std::cout << "k = " << k << std::endl;
                                 numbers[k] = l++;
                             }
                     break;
@@ -202,6 +223,9 @@ namespace PHiLiP {
 
     void read_gmsh_entities(std::ifstream &infile, std::array<std::map<int, int>, 4> &tag_maps)
     {
+        const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+        dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+
         std::string  line;
         // if the next block is of kind $Entities, parse it
         unsigned long n_points, n_curves, n_surfaces, n_volumes;
@@ -218,6 +242,8 @@ namespace PHiLiP {
             // we only care for 'tag' as key for tag_maps[0]
             infile >> entity_tag >> box_min_x >> box_min_y >> box_min_z >> n_physicals;
 
+//            pcout << "point n_physical = " << n_physicals << std::endl;
+
             // if there is a physical tag, we will use it as boundary id below
             AssertThrow(n_physicals < 2, dealii::ExcMessage("More than one tag is not supported!"));
             // if there is no physical tag, use 0 as default
@@ -233,6 +259,9 @@ namespace PHiLiP {
 
             // we only care for 'tag' as key for tag_maps[1]
             infile >> entity_tag >> box_min_x >> box_min_y >> box_min_z >> box_max_x >> box_max_y >> box_max_z >> n_physicals;
+
+//            pcout << "curve n_physical = " << n_physicals << std::endl;
+
             // if there is a physical tag, we will use it as boundary id below
             AssertThrow(n_physicals < 2, dealii::ExcMessage("More than one tag is not supported!"));
             // if there is no physical tag, use 0 as default
@@ -254,6 +283,9 @@ namespace PHiLiP {
 
             // we only care for 'tag' as key for tag_maps[2]
             infile >> entity_tag >> box_min_x >> box_min_y >> box_min_z >> box_max_x >> box_max_y >> box_max_z >> n_physicals;
+
+//            pcout << "surf n_physical = " << n_physicals << std::endl;
+
             // if there is a physical tag, we will use it as boundary id below
             AssertThrow(n_physicals < 2, dealii::ExcMessage("More than one tag is not supported!"));
             // if there is no physical tag, use 0 as default
@@ -275,6 +307,9 @@ namespace PHiLiP {
 
             // we only care for 'tag' as key for tag_maps[3]
             infile >> entity_tag >> box_min_x >> box_min_y >> box_min_z >> box_max_x >> box_max_y >> box_max_z >> n_physicals;
+
+//            pcout << "vol n_physical = " << n_physicals << std::endl;
+
             // if there is a physical tag, we will use it as boundary id below
             AssertThrow(n_physicals < 2,
                         dealii::ExcMessage("More than one tag is not supported!"));
@@ -400,6 +435,14 @@ namespace PHiLiP {
             cell_order = 0;
         } else {
             //AssertThrow(false, dealii::ExcGmshUnsupportedGeometry(cell_type));
+            std::cout << "Invalid element type read from GMSH " << cell_type << ". "
+                      << "\n Valid element types are:"
+                      << "\n " << MSH_PNT
+                      << "\n " << MSH_LIN_2 << " " << MSH_LIN_3 << " " << MSH_LIN_4 << " " << MSH_LIN_5 << " " << MSH_LIN_6 << " " << MSH_LIN_7 << " " << MSH_LIN_8 << " " << MSH_LIN_9
+                      << "\n " << MSH_QUA_4 << " " << MSH_QUA_9 << " " << MSH_QUA_16 << " " << MSH_QUA_25 << " " << MSH_QUA_36 << " " << MSH_QUA_49 << " " << MSH_QUA_64 << " " << MSH_QUA_81
+                      << "\n " << MSH_HEX_8 <<  " " << MSH_HEX_27 << " " << MSH_HEX_64 << " " << MSH_HEX_125 << " " << MSH_HEX_216 << " " << MSH_HEX_343 << " " << MSH_HEX_512 << " " << MSH_HEX_729
+                      << std::endl;
+            std::abort();
         }
 
         return cell_order;
@@ -477,7 +520,11 @@ namespace PHiLiP {
         return i + j*n_per_line;
     }
 
-
+    /**
+     * Solely used in the 3D case. Helps finding the face_nodes during recursive call.
+     * @param degree
+     * @return
+     */
     std::vector<unsigned int>
     face_node_finder(const unsigned int degree)
     {
@@ -965,6 +1012,174 @@ namespace PHiLiP {
         k = index;
     }
 
+
+    template <int dim, int spacedim>
+    bool get_new_rotated_indices(const dealii::CellAccessor<dim, spacedim>& cell,
+                                 const std::vector<dealii::Point<spacedim>>& all_vertices,
+                                 const std::vector<unsigned int>& deal_h2l,
+                                 const std::vector<unsigned int>& rotate_z90degree,
+                                 std::vector<unsigned int>& high_order_vertices_id)
+    {
+
+        const unsigned int n_vertices = cell.n_vertices();
+        for (int zr = 0; zr < 4; ++zr) {
+
+            std::vector<char> matching(n_vertices);
+
+            for (unsigned int i_vertex=0; i_vertex < n_vertices; ++i_vertex) {
+
+                const unsigned int base_index = i_vertex;
+                const unsigned int lexicographic_index = deal_h2l[base_index];
+
+                const unsigned int vertex_id = high_order_vertices_id[lexicographic_index];
+                const dealii::Point<dim,double> high_order_vertex = all_vertices[vertex_id];
+
+                bool found = false;
+                for (unsigned int i=0; i < n_vertices; ++i) {
+                    if (cell.vertex(i) == high_order_vertex) {
+                        found = true;
+                    }
+                }
+                if (!found) {
+                    std::cout << "Wrong cell... High-order nodes do not match the cell's vertices." << std::endl;
+                    std::abort();
+                }
+
+                matching[i_vertex] = (high_order_vertex == cell.vertex(i_vertex)) ? 'T' : 'F';
+            }
+
+            bool all_matching = true;
+            for (unsigned int i=0; i < n_vertices; ++i) {
+                if (matching[i] == 'F') all_matching = false;
+            }
+            if (all_matching) return true;
+
+            const auto high_order_vertices_id_temp = high_order_vertices_id;
+            for (unsigned int i=0; i<high_order_vertices_id.size(); ++i) {
+                high_order_vertices_id[i] = high_order_vertices_id_temp[rotate_z90degree[i]];
+            }
+        }
+        return false;
+    }
+
+
+    template <int dim, int spacedim>
+    bool get_new_rotated_indices_3D(const dealii::CellAccessor<dim, spacedim>& cell,
+                                 const std::vector<dealii::Point<spacedim>>& all_vertices,
+                                 const std::vector<unsigned int>& deal_h2l,
+                                 const std::vector<unsigned int>& rotate_x90degree_3D,
+                                 const std::vector<unsigned int>& rotate_y90degree_3D,
+                                 const std::vector<unsigned int>& rotate_z90degree_3D,
+                                 std::vector<unsigned int>& high_order_vertices_id_rotated)
+    {
+
+        const int mpi_rank = dealii::Utilities::MPI::this_mpi_process(MPI_COMM_WORLD);
+        dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
+
+        //These are for 3D
+        //auto high_order_vertices_id_rotated = high_order_cells[icell].vertices;
+//        auto high_order_vertices_id_rotated = high_order_vertices_id_lexico;
+        auto high_order_flip_id_rotated = high_order_vertices_id_rotated;
+        auto high_order_x_id_rotated = high_order_vertices_id_rotated;
+        auto high_order_y_id_rotated = high_order_vertices_id_rotated;
+        auto high_order_vertices_id = high_order_vertices_id_rotated;
+
+        const unsigned int n_vertices = cell.n_vertices();
+
+        bool good_rotation;
+
+        for (int xr = 0; xr < 4; ++xr) {                                                                            //Rotate X
+            for (int zr = 0; zr < 4; ++zr) {                                                                        //Rotate Y
+                for (unsigned int zr3d = 0; zr3d < 4; ++zr3d) {                                                     //Rotate Z
+
+                    std::vector<char> matching(n_vertices);
+
+                    for (unsigned int i_vertex = 0; i_vertex < n_vertices; ++i_vertex) {                            //ONLY VERTEX POINTS
+
+                        const unsigned int base_index = i_vertex;
+                        const unsigned int lexicographic_index = deal_h2l[base_index];                                      //MAP IT BACK, THESE ARE POSITIONS INDEX, SO GET THE LEXICOGRAHICAL_INDEX OF DEALII AND MAP IT BACK
+
+                        //const unsigned int gmsh_hierarchical_index = gmsh_l2h[lexicographic_index];
+                        //const unsigned int vertex_id = high_order_vertices_id_rotated[gmsh_hierarchical_index];
+                        const unsigned int vertex_id = high_order_vertices_id_rotated[lexicographic_index];
+                        const dealii::Point<dim, double> high_order_vertex = all_vertices[vertex_id];                        //ALL_VERTICES IS IN HIERARCHICAL ORDER WITH POINTS (SO VERTEX_ID HITS BANG ON)
+                        //std::cout << high_order_vertex << std::endl;
+
+                        //.I.E. 0 4 20 24 5 -> POSITION 1 IS 4, SO FIRST NODE IN DEALII ORDERING WOULD BE AT POSITION 4 IN THE LEXICOGRPAHICAL ORDERING GENERATED BY GMSH
+
+                        //THIS IS JUST TO SEE IF THE HIGHER ORDER NODES ARE FOUND (TECHNICALLY, WE SHOULD BE ONLY TARGETING 2D NODES, NOT THE 1D) -> THIS SHOULD BE FILTERED OUT FROM HIGH_ORDER_VERTEX
+                        bool found = false;
+                        for (unsigned int i=0; i < n_vertices; ++i) {
+                            if (cell.vertex(i) == high_order_vertex) {
+                                found = true;
+                            }
+                        }
+                        if (!found) {
+                            std::cout << "Wrong cell... High-order nodes do not match the cell's vertices." << std::endl;
+                            std::abort();
+                        }
+
+                        matching[i_vertex] = (high_order_vertex == cell.vertex(i_vertex)) ? 'T' : 'F';
+                    }
+
+                    /**
+                     * TECHNICALLY, THE MATCHING VECTOR SHOULD BE ALL 0 IF THEY ALL MATCH
+                     */
+
+//                                    pcout << "********** CELL VERTEX **********" << std::endl;
+
+                    bool all_matching = true;
+                    for (unsigned int i = 0; i < n_vertices; ++i) {
+                        if (matching[i] == 1) all_matching = false;
+                    }
+
+                    good_rotation = all_matching;
+                    if (good_rotation) {
+                        pcout << "Found good rotation, now exiting rotation routine" << std::endl;
+                        break;
+                    }
+
+                    high_order_vertices_id = high_order_vertices_id_rotated;
+
+                    for (unsigned int i = 0; i < high_order_vertices_id.size(); ++i) {
+                        high_order_vertices_id_rotated[i] = high_order_vertices_id[rotate_z90degree_3D[i]];
+                    }
+                }
+
+                if (good_rotation) {
+                    pcout << "Found good rotation, now exiting rotation routine" << std::endl;
+                    break;
+                }
+
+                //If we did not find a good rotation, we rotate in the y-axis
+                high_order_y_id_rotated = high_order_vertices_id_rotated;
+                for (unsigned int i = 0; i < high_order_vertices_id.size(); ++i) {
+                    high_order_vertices_id_rotated[i] = high_order_y_id_rotated[rotate_y90degree_3D[i]];
+                }
+
+            }
+
+            if (good_rotation) {
+                pcout << "Found good rotation, now exiting rotation routine" << std::endl;
+                break;
+            }
+
+            high_order_x_id_rotated = high_order_vertices_id_rotated;
+            for (unsigned int i = 0; i < high_order_vertices_id.size(); ++i) {
+                high_order_vertices_id_rotated[i] = high_order_x_id_rotated[rotate_x90degree_3D[i]];
+            }
+
+        }
+
+        if (good_rotation) {
+            pcout << "Found good rotation, now exiting rotation routine" << std::endl;
+            return true;
+        }
+
+        return false;
+    }
+
+
     template <int dim, int spacedim>
     std::shared_ptr< HighOrderGrid<dim, double> >
     read_gmsh(std::string filename, int requested_grid_order)
@@ -974,8 +1189,8 @@ namespace PHiLiP {
         dealii::ConditionalOStream pcout(std::cout, mpi_rank==0);
 
 
-        pcout << "dim = " << dim << std::endl;
-        pcout << "spacedim = " << dim << std::endl;
+//        pcout << "dim = " << dim << std::endl;
+//        pcout << "spacedim = " << dim << std::endl;
 
 //    Assert(dim==2, dealii::ExcInternalError());                               //COMMENT THIS OUT BECAUSE WE NOW TEST 3D GMSH
         std::ifstream infile;
@@ -1084,7 +1299,7 @@ namespace PHiLiP {
                         dealii::Triangulation<dim>::smoothing_on_refinement |
                         dealii::Triangulation<dim>::smoothing_on_coarsening));                                  //THIS HERE UNLOCKS THE SMOOTHING CAPABILITIES UPON REFINE AND COARSEN OF THE MESH
 
-        pcout << "What is the grid_order passed to high_order_grid > " << grid_order << std::endl;
+//        pcout << "What is the grid_order passed to high_order_grid > " << grid_order << std::endl;
 
         /**
          * CONSTRUCT A HIGHER ORDER GRID INSTANCE
@@ -1125,12 +1340,12 @@ namespace PHiLiP {
             unsigned int vertices_per_element = std::pow(2, dimEntity);
             unsigned int nodes_per_element = std::pow(cell_order + 1, dimEntity);
 
-            pcout << "************************************" << std::endl;
-            pcout << "Cell_type  = " << cell_type << std::endl;
-            pcout << "Cell Order = " << cell_order << std::endl;
-            pcout << "Dim entity = " << dimEntity << std::endl;
-            pcout << "verticies_per_element = " << vertices_per_element << std::endl;
-            pcout << "nodes_per_element = " << nodes_per_element << std::endl;
+//            pcout << "************************************" << std::endl;
+//            pcout << "Cell_type  = " << cell_type << std::endl;
+//            pcout << "Cell Order = " << cell_order << std::endl;
+//            pcout << "Dim entity = " << dimEntity << std::endl;
+//            pcout << "verticies_per_element = " << vertices_per_element << std::endl;
+//            pcout << "nodes_per_element = " << nodes_per_element << std::endl;
 
             for (unsigned int cell_per_entity = 0; cell_per_entity < numElements; ++cell_per_entity, ++global_cell) {
 
@@ -1171,10 +1386,10 @@ namespace PHiLiP {
                     //GET THE MATERIAL ID OF THAT CELL
                     p1_cells.back().material_id = material_id;
 
-                    pcout << "Before for p1_cells" << std::endl;
-                    for (auto aNode : high_order_cells.back().vertices){
-                        pcout << "Node : " << aNode << std::endl;
-                    }
+//                    pcout << "Before for p1_cells" << std::endl;
+//                    for (auto aNode : high_order_cells.back().vertices){
+//                        pcout << "Node : " << aNode << std::endl;
+//                    }
 
                     // transform from ucd to consecutive numbering                                                            (BASICALLY ALL INDEX - 1 TO MAKE INDEX START AT 0 INSTEAD OF 1)
                     for (unsigned int i = 0; i < vertices_per_element; ++i) {
@@ -1225,11 +1440,11 @@ namespace PHiLiP {
                     // transform from ucd to consecutive numbering                                                              (BASICALLY SHIFT NODES FROM STARTING AT 1 TO STARTING AT 0)
                     for (unsigned int &vertex : subcelldata.boundary_lines.back().vertices) {
 
-                        pcout << "--------------------------------------------------------------" << std::endl;
-                        pcout << "Which Cell ? " << cell_per_entity <<  " | What is the size of this vector ? "  << subcelldata.boundary_lines.back().vertices.size() << std::endl;
-                        pcout << "What is Vertex ? -> " << vertex << std::endl;
+//                        pcout << "--------------------------------------------------------------" << std::endl;
+//                        pcout << "Which Cell ? " << cell_per_entity <<  " | What is the size of this vector ? "  << subcelldata.boundary_lines.back().vertices.size() << std::endl;
+//                        pcout << "What is Vertex ? -> " << vertex << std::endl;
                         if (vertex_indices.find(vertex) != vertex_indices.end()) {
-                            pcout << "Cell type = " << cell_type << " | What is the vertex? -> " << vertex << std::endl;
+//                            pcout << "Cell type = " << cell_type << " | What is the vertex? -> " << vertex << std::endl;
                             vertex = vertex_indices[vertex];
                         } else {
                             // no such vertex index
@@ -1310,7 +1525,7 @@ namespace PHiLiP {
         // AssertThrow(p1_cells.size() > 0, dealii::ExcGmshNoCellInformation());
 
         // do some clean-up on vertices...
-        auto all_vertices = vertices;
+        const std::vector<dealii::Point<spacedim>> all_vertices = vertices;
         dealii::GridTools::delete_unused_vertices(vertices, p1_cells, subcelldata);
         // ... and p1_cells
         if (dim == spacedim) {
@@ -1320,7 +1535,7 @@ namespace PHiLiP {
         /**
          * THE SIZE OF P1_CELLS SHOULD BE EQUAL TO THE NUMBER OF CELLS THAT IS OF DIMENSION == STRUCTDIM
          */
-        pcout << "What is the size of p1_cells ? -> " << p1_cells.size() << std::endl;
+//        pcout << "What is the size of p1_cells ? -> " << p1_cells.size() << std::endl;
 
         dealii::GridReordering<dim, spacedim>::reorder_cells(p1_cells);                                     //REORDERS THE CELLS BASED ON DEALII INTERPRETATION (DIRECTION OF SHARED EDGES MUST POINT IN THE SAME DIRECTION FOR ADJACENT CELLS)
 
@@ -1352,15 +1567,15 @@ namespace PHiLiP {
             pcout << aNode << std::endl;
         }
 
-        pcout << "dim ?? -> " << dim << std::endl;
-        pcout << "Grid Order ?? -> " << grid_order << std::endl;
+//        pcout << "dim ?? -> " << dim << std::endl;
+//        pcout << "Grid Order ?? -> " << grid_order << std::endl;
 
         pcout << std::endl;
 
         int icell = 0;
         std::vector<dealii::types::global_dof_index> dof_indices(high_order_grid->fe_system.dofs_per_cell);                 //CREATING A VECTOR OF GLOBAL_DOF INDEX WITH SIZE DOFS PER CELL (NOTE HERE WE HAVE DOFS FOR X AND Y)
-        pcout << "dofs_per_cell = " << high_order_grid->fe_system.dofs_per_cell << std::endl;
-        pcout << "size of vector dof_indices = " << dof_indices.size() << std::endl;
+//        pcout << "dofs_per_cell = " << high_order_grid->fe_system.dofs_per_cell << std::endl;
+//        pcout << "size of vector dof_indices = " << dof_indices.size() << std::endl;
 
         /**
          * THIS IS WHERE WE START TO CHANGE THE LEXICOGRAPHICAL ORDERING AND ALSO, WHERE WE PLACE THE NODES INTO DEALII
@@ -1391,7 +1606,7 @@ namespace PHiLiP {
                 for (unsigned int ihierachic=0; ihierachic<high_order_vertices_id.size(); ++ihierachic) {
                     const unsigned int lexico_id = gmsh_h2l[ihierachic];
                     high_order_vertices_id_lexico[lexico_id] = high_order_vertices_id[ihierachic];
-                    std::cout << "hierchical = " << ihierachic << " + high_order_vertices_id[ihierachic] = " << high_order_vertices_id[ihierachic] + 1 << " + coord = X - Y - Z = " << all_vertices[high_order_vertices_id[ihierachic]] << std::endl;
+//                    std::cout << "hierchical = " << ihierachic << " + high_order_vertices_id[ihierachic] = " << high_order_vertices_id[ihierachic] + 1 << " + coord = X - Y - Z = " << all_vertices[high_order_vertices_id[ihierachic]] << std::endl;
                 }
 
                 //auto high_order_vertices_id_rotated = high_order_cells[icell].vertices;
@@ -1514,8 +1729,6 @@ namespace PHiLiP {
                                         bool found = false;
                                         for (unsigned int i = 0; i < cell->n_vertices(); ++i) {
                                             if (cell->vertex(i) == high_order_vertex) {
-                                                pcout << " Cell vertex " << i << " matches HO vertex " << i_vertex
-                                                      << std::endl;
                                                 found = true;
                                             }
                                         }
@@ -1534,8 +1747,6 @@ namespace PHiLiP {
                                     /**
                                      * TECHNICALLY, THE MATCHING VECTOR SHOULD BE ALL 0 IF THEY ALL MATCH
                                      */
-
-                                    pcout << "********** CELL VERTEX **********" << std::endl;
 
                                     bool all_matching = true;
                                     for (unsigned int i = 0; i < cell->n_vertices(); ++i) {
@@ -1661,6 +1872,11 @@ namespace PHiLiP {
             }
             icell++;
         }
+
+        pcout << "*********************************************************************\n";
+        pcout << "//********************** DONE ROTATING CELLS **********************//\n";
+        pcout << "*********************************************************************\n";
+        pcout << " " << std::endl;
 
         //DONE WITH THE ROTATIONS, NOW READ THE NODES INSIDE HIGHER ORDER GRID
 
